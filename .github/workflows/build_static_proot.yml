@@ -1,4 +1,4 @@
-name: Build Static Proot (Final Fix)
+name: Build Static Proot (Final)
 
 on:
   workflow_dispatch:
@@ -13,10 +13,10 @@ jobs:
 
       - name: Clone Termux Packages
         run: |
+          # 克隆最新的 termux-packages 仓库
           git clone https://github.com/termux/termux-packages.git
           cd termux-packages
-          # 这是一个非常稳定的历史版本，推荐锁定
-          git checkout 2d0c6c4 
+          # 不再锁定特定 commit，直接使用最新版
 
       - name: Inject Static Build Config
         working-directory: ./termux-packages
@@ -24,11 +24,12 @@ jobs:
           BUILD_SCRIPT="packages/proot/build.sh"
           echo "Injecting static build config..."
 
+          # 注入编译配置
           cat <<EOT >> $BUILD_SCRIPT
 
           # === INJECTED CONFIG ===
           termux_step_pre_configure() {
-              # 1. 禁用 Loader 分离，防止去 Termux 路径找 loader
+              # 1. 关键：禁用 Loader 分离
               unset PROOT_UNBUNDLE_LOADER
               
               # 2. 强制静态链接
@@ -37,7 +38,9 @@ jobs:
               # 3. 增加参数长度限制
               CPPFLAGS+=" -DARG_MAX=131072"
               
-              # 注意：这里删除了 CARE_ABOUT_EXTENSION=0，确保所有扩展都被编译进去
+              # 4. 【关键修复】
+              # 之前可能会加 export CARE_ABOUT_EXTENSION=0
+              # 现在不要加这行！默认开启扩展支持，解决 fchdir 报错
           }
 
           termux_step_make_install() {
@@ -49,13 +52,19 @@ jobs:
               make V=1
               make install
               
+              # 剥离符号表
               \$STRIP proot
               
+              # 准备输出
               mkdir -p /home/builder/termux-packages/output
+              
+              # 复制并重命名为 libproot.so
               cp proot /home/builder/termux-packages/output/libproot.so
           }
           # =======================
           EOT
+          
+          echo "Build script modified successfully."
 
       - name: Build with Docker
         working-directory: ./termux-packages

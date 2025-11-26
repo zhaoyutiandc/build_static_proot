@@ -1,4 +1,4 @@
-name: Build Static Proot (Fixed)
+name: Build Static Proot (Final Fix)
 
 on:
   workflow_dispatch:
@@ -15,6 +15,8 @@ jobs:
         run: |
           git clone https://github.com/termux/termux-packages.git
           cd termux-packages
+          # 这是一个非常稳定的历史版本，推荐锁定
+          git checkout 2d0c6c4 
 
       - name: Inject Static Build Config
         working-directory: ./termux-packages
@@ -26,17 +28,16 @@ jobs:
 
           # === INJECTED CONFIG ===
           termux_step_pre_configure() {
-              # 禁用 Loader 分离，强制内置 Loader
+              # 1. 禁用 Loader 分离，防止去 Termux 路径找 loader
               unset PROOT_UNBUNDLE_LOADER
               
-              # 强制静态链接
+              # 2. 强制静态链接
               LDFLAGS+=" -static"
 
-              # 增加参数长度限制
+              # 3. 增加参数长度限制
               CPPFLAGS+=" -DARG_MAX=131072"
               
-              # 禁用 Seccomp 扩展检测
-              export CARE_ABOUT_EXTENSION=0
+              # 注意：这里删除了 CARE_ABOUT_EXTENSION=0，确保所有扩展都被编译进去
           }
 
           termux_step_make_install() {
@@ -51,7 +52,6 @@ jobs:
               \$STRIP proot
               
               mkdir -p /home/builder/termux-packages/output
-              # 重命名为 .so 以便放入 jniLibs
               cp proot /home/builder/termux-packages/output/libproot.so
           }
           # =======================

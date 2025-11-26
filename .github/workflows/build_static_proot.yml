@@ -1,9 +1,7 @@
-name: Build Static Proot for Android
+name: Build Static Proot (Fixed)
 
 on:
-  workflow_dispatch:  # 允许手动触发
-  push:
-    branches: [ main ] # 允许推送到 main 分支时触发
+  workflow_dispatch:
 
 jobs:
   build-static-proot:
@@ -15,88 +13,53 @@ jobs:
 
       - name: Clone Termux Packages
         run: |
-          # 克隆最新的 termux-packages 仓库
           git clone https://github.com/termux/termux-packages.git
           cd termux-packages
-          # 这是一个比较稳定的 commit，也可以删掉这行使用最新版
-          # git checkout 2d0c6c4 
 
       - name: Inject Static Build Config
         working-directory: ./termux-packages
         run: |
           BUILD_SCRIPT="packages/proot/build.sh"
-          echo "正在注入静态编译配置到 $BUILD_SCRIPT ..."
+          echo "Injecting static build config..."
 
-          # 我们使用 cat 覆写 termux_step_pre_configure 函数
-          # 核心目的是：
-          # 1. 取消 PROOT_UNBUNDLE_LOADER (防止它去外部找 loader)
-          # 2. 添加 -static 参数
-          
           cat <<EOT >> $BUILD_SCRIPT
 
-          # === INJECTED BY GITHUB ACTIONS ===
+          # === INJECTED CONFIG ===
           termux_step_pre_configure() {
-              # [关键] 禁用 Loader 分离，强制将 loader 编译进 proot 二进制
-              # 如果不加这个，proot 会尝试加载 /data/data/com.termux/files/.../loader.so 导致崩溃
+              # 禁用 Loader 分离，强制内置 Loader
               unset PROOT_UNBUNDLE_LOADER
               
               # 强制静态链接
               LDFLAGS+=" -static"
-              
-              # 解决部分静态链接时的符号问题
-              LDFLAGS+=" -lutil"
 
-              # 增加参数长度限制，防止 Android 下报错
+              # 增加参数长度限制
               CPPFLAGS+=" -DARG_MAX=131072"
               
-              # 禁用 Seccomp 扩展检测 (静态编译有时会有问题，禁用更稳)
+              # 禁用 Seccomp 扩展检测
               export CARE_ABOUT_EXTENSION=0
           }
 
           termux_step_make_install() {
               cd \$TERMUX_PKG_SRCDIR/src
               
-              # 修改 temp 路径，适配无 root 环境
+              # 修改 temp 路径
               sed -i 's/P_tmpdir/"\/tmp"/g' path/temp.c
               
-              # 开始编译
               make V=1
               make install
               
-              # 剥离符号表减小体积
               \$STRIP proot
               
-              # 准备输出目录
               mkdir -p /home/builder/termux-packages/output
-              
-              # 复制并重命名为 libproot.so (方便直接放入 Android 项目的 jniLibs)
+              # 重命名为 .so 以便放入 jniLibs
               cp proot /home/builder/termux-packages/output/libproot.so
           }
-          # ==================================
+          # =======================
           EOT
-          
-          echo "注入完成。脚本末尾如下："
-          tail -n 30 $BUILD_SCRIPT
 
       - name: Build with Docker
         working-directory: ./termux-packages
-        run: |
-          # 使用 Termux 官方 Docker 环境编译
-          # -a aarch64: 只编译 ARM64
-          # proot: 包名
-          ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot
-
-      - name: Verify Artifact
-        working-directory: ./termux-packages
-        run: |
-          if [ -f "output/libproot.so" ]; then
-            echo "编译成功！文件信息："
-            ls -lh output/libproot.so
-            file output/libproot.so
-          else
-            echo "错误：未找到编译产物 libproot.so"
-            exit 1
-          fi
+        run: ./scripts/run-docker.sh ./build-package.sh -a aarch64 proot
 
       - name: Upload Static Binary
         uses: actions/upload-artifact@v4
